@@ -73,7 +73,9 @@ ic3_years = list(range(2016,2022))
 # ic3_urls = [ic3_2016_url, ic3_2017_url, ic3_2018_url, ic3_2019_url, ic3_2020_url, ic3_2021_url]
 
 #initialize data list
-ic3_list = []
+victim_count_list = []
+loss_amount_list = []
+subject_count_list = []
 
 for ic3_year in ic3_years:
     
@@ -97,7 +99,9 @@ for ic3_year in ic3_years:
             #find all the page tables
             ic3_tables = soup.find_all('table', class_ = 'crimetype')
             
-            for ic3_table in ic3_tables:
+            for i in range(0,len(ic3_tables)):
+                
+                ic3_table = ic3_tables[i]
                 #parse table
                 this_ic3_table = parse_it(ic3_table)
                 #convert to dataframe, set headers
@@ -106,8 +110,15 @@ for ic3_year in ic3_years:
                 #insert state and source
                 this_ic3_table_df['state'] = selected_state
                 this_ic3_table_df['url'] = ic3_url
-                #store to ic3 list
-                ic3_list.append(this_ic3_table_df)
+                
+                #store to corresponding list
+                if i == 0:
+                    victim_count_list.append(this_ic3_table_df)
+                elif i == 1:
+                    loss_amount_list.append(this_ic3_table_df)
+                elif i == 2:
+                    subject_count_list.append(this_ic3_table_df)
+                    
         
         except TimeoutException:
             pass
@@ -118,6 +129,19 @@ for ic3_year in ic3_years:
         
         sleep(1)        
 
+victim_count_df = pd.concat(victim_count_list)
+victim_count_df = victim_count_df.drop_duplicates()
+
+loss_amount_df = pd.concat(loss_amount_list)
+loss_amount_df = loss_amount_df.drop_duplicates()
+
+subject_count_df = pd.concat(subject_count_list)
+subject_count_df = subject_count_df.drop_duplicates()
+
+#free up some memory
+del victim_count_list
+del loss_amount_list
+del subject_count_list
 #%% Google Exploit DB
 
 def google_processing_check(wait):
