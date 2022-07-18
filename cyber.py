@@ -63,19 +63,9 @@ actions = ActionChains(driver);
 #%% IC3
 
 ic3_years = list(range(2016,2022))
-# ic3_2021_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2021State/StateReport.aspx'
-# ic3_2020_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2020State/StateReport.aspx'
-# ic3_2019_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2019State/StateReport.aspx'
-# ic3_2018_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2018State/StateReport.aspx'
-# ic3_2017_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2017State/StateReport.aspx'
-# ic3_2016_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/2016State/StateReport.aspx'
-
-# ic3_urls = [ic3_2016_url, ic3_2017_url, ic3_2018_url, ic3_2019_url, ic3_2020_url, ic3_2021_url]
 
 #initialize data list
-victim_count_list = []
-loss_amount_list = []
-subject_count_list = []
+ic3_list = []
 
 for ic3_year in ic3_years:
     
@@ -84,64 +74,77 @@ for ic3_year in ic3_years:
     driver.get(ic3_url)
     
     for i in range(2,59):  
-
-        try:
     
-            #get selected state from site title
-            state_dropdown_xpath = '/html/body/div/form/header/div[2]/h1'
-            selected_state = wait.until(EC.element_to_be_clickable((By.XPATH, state_dropdown_xpath))).text
+        #get selected state from site title
+        state_dropdown_xpath = '/html/body/div/form/header/div[2]/h1'
+        selected_state = wait.until(EC.element_to_be_clickable((By.XPATH, state_dropdown_xpath))).text
+        
+        print(i,selected_state)
+    
+        #switch to soup
+        soup = bs(driver.page_source, 'lxml') 
+    
+        #find all the page tables
+        ic3_tables = soup.find_all('table', class_ = 'crimetype')
+        
+        #for i in range(0,len(ic3_tables)):
+        for ic3_table in ic3_tables:
             
-            print(i,selected_state)
+            #ic3_table = ic3_tables[i]
+            #parse table
+            this_ic3_table = parse_it(ic3_table)
+            #convert to dataframe, set headers
+            this_ic3_table_df = pd.DataFrame(this_ic3_table, columns = this_ic3_table[0])
+            this_ic3_table_df = this_ic3_table_df.drop(this_ic3_table_df.index[0])
+            
+            #get the 3rd and 4th column
+            first_ic3_subset_df = this_ic3_table_df.iloc[:,0:2]
+            second_ic3_subset_df = this_ic3_table_df.iloc[:,2:4]
+            
+            final_ic3_df = pd.concat([first_ic3_subset_df, second_ic3_subset_df])
+            #insert state and source
+            final_ic3_df['state'] = selected_state
+            final_ic3_df['url'] = ic3_url
+            
+            ic3_list.append(final_ic3_df)
 
-            #switch to soup
-            soup = bs(driver.page_source, 'lxml') 
-        
-            #find all the page tables
-            ic3_tables = soup.find_all('table', class_ = 'crimetype')
-            
-            for i in range(0,len(ic3_tables)):
-                
-                ic3_table = ic3_tables[i]
-                #parse table
-                this_ic3_table = parse_it(ic3_table)
-                #convert to dataframe, set headers
-                this_ic3_table_df = pd.DataFrame(this_ic3_table, columns = this_ic3_table[0])
-                this_ic3_table_df = this_ic3_table_df.drop(this_ic3_table_df.index[0])
-                #insert state and source
-                this_ic3_table_df['state'] = selected_state
-                this_ic3_table_df['url'] = ic3_url
-                
-                #store to corresponding list
-                if i == 0:
-                    victim_count_list.append(this_ic3_table_df)
-                elif i == 1:
-                    loss_amount_list.append(this_ic3_table_df)
-                elif i == 2:
-                    subject_count_list.append(this_ic3_table_df)
-                    
-        
-        except TimeoutException:
-            pass
-        
         updated_url = ic3_url + '#?s={}'.format(str(i))
+        
+        print(updated_url)
     
         driver.get(updated_url)
         
         sleep(1)        
 
+victim_count_list = []
+loss_amount_list = []
+subject_count_list = []
+
+for ic3 in ic3_list:
+    
+    if 'Victim Count' in ic3.columns.values:
+         victim_count_list.append(ic3)
+    
+    elif 'Loss Amount' in ic3.columns.values:
+        loss_amount_list.append(ic3)
+    
+    elif 'Subject Count' in ic3.columns.values:
+        subject_count_list.append(ic3)
+        
 victim_count_df = pd.concat(victim_count_list)
-victim_count_df = victim_count_df.drop_duplicates()
+#victim_count_df = victim_count_df.drop_duplicates()
 
 loss_amount_df = pd.concat(loss_amount_list)
-loss_amount_df = loss_amount_df.drop_duplicates()
+#loss_amount_df = loss_amount_df.drop_duplicates()
 
 subject_count_df = pd.concat(subject_count_list)
-subject_count_df = subject_count_df.drop_duplicates()
+#subject_count_df = subject_count_df.drop_duplicates()
 
 #free up some memory
 del victim_count_list
 del loss_amount_list
 del subject_count_list
+
 #%% Google Exploit DB
 
 def google_processing_check(wait):
@@ -151,7 +154,7 @@ def google_processing_check(wait):
     except ignored_exceptions:
         pass
     
-google_exploit_db = 'https://www.exploit-db.com/' #''https://www.exploit-db.com/google-hacking-database'
+google_exploit_db = 'https://www.exploit-db.com/' 
 driver.get(google_exploit_db)
 
 google_processing_check(wait)
@@ -182,6 +185,7 @@ for i in range(1, total_pages + 1):
 
     try:
         this_google_table = parse_it(google_table)
+        #convert to dataframe and drop the first row
         this_google_table_df = pd.DataFrame(this_google_table, columns = this_google_table[0])
         this_google_table_df = this_google_table_df.drop(this_google_table_df.index[0])
         google_exploit_list.append(this_google_table_df)
@@ -210,18 +214,17 @@ for i in range(1, total_pages + 1):
 
 #concatenate the list of dataframes
 google_exploits_df = pd.concat(google_exploit_list)    
-google_exploits_df = google_exploits_df.drop_duplicates()    
+#google_exploits_df = google_exploits_df.drop_duplicates()    
 
 #free up some memory
 del google_exploit_list
-
 
 #%% CVES
 #loop through the years + months & collect results
 
 cve_details_list = []
 
-years = list(range(2002,2023))
+years = list(range(2016,2023))
 month_numbers = list(range(1,13))
 
 for year in years:
@@ -234,8 +237,7 @@ for year in years:
         
         #move to the bottom to get all of the page links
         scroll_to_bottom(driver)
-        page_section_xpath = '//*[@id="pagingb"]'
-        page_section = wait.until(EC.element_to_be_clickable((By.XPATH, page_section_xpath)))
+        page_section = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="pagingb"]')))
         page_links = [i for i in page_section.find_elements(By.TAG_NAME,'a')]
         
         for l in range(0,len(page_links)):
@@ -243,7 +245,8 @@ for year in years:
             print(year, month_name[month_number], l)
             
             #redeclare stale elements
-            page_section = wait.until(EC.element_to_be_clickable((By.XPATH, page_section_xpath)))
+            scroll_to_bottom(driver)
+            page_section = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="pagingb"]')))
             link = [i for i in page_section.find_elements(By.TAG_NAME,'a')][l]
             
             link.click()
@@ -255,7 +258,9 @@ for year in years:
     
             try:
                 this_cve_table = parse_it(cve_table)
+                #create dataframe from results
                 this_cve_table_df = pd.DataFrame(this_cve_table, columns = this_cve_table[0])
+                #drop out the first row
                 this_cve_table_df = this_cve_table_df.drop(this_cve_table_df.index[0])
                 cve_details_list.append(this_cve_table_df)
               
@@ -263,13 +268,12 @@ for year in years:
                  pass
 
 cve_details_df = pd.concat(cve_details_list)
-cve_details_df = cve_details_df.drop_duplicates()
+#cve_details_df = cve_details_df.drop_duplicates()
 
 #free up some memory
 del cve_details_list
 
 driver.close()
-
 
 #%% Google Scholar
 #credit: https://medium.com/@nandinisaini021/scraping-publications-of-aerial-image-research-papers-on-google-scholar-using-python-a0dee9744728
@@ -279,15 +283,14 @@ driver.close()
 def get_paper_info(paper_url):
     '''Collect page info'''
     headers = {'user-agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.114 Safari/537.36'}
-    response = get(paper_url,headers=headers)
-    
+    response = get(paper_url,headers=headers)  
     #check for successful response
     if response.status_code != 200:
-        raise Exception('Failed to fetch web page ')
-    
+        raise Exception('Failed to fetch web page.')          
+        #try again
+        response = get(paper_url,headers=headers)  
     #get page text
     paper_doc = bs(response.text,'html.parser')
-    
     return paper_doc
 
 def get_tags(doc):
@@ -301,7 +304,7 @@ def get_title(paper_tag):
     '''Collect paper title'''
     paper_names = []
     for tag in paper_tag:
-      paper_names.append(tag.select('h3')[0].get_text())
+        paper_names.append(tag.select('h3')[0].get_text())
     return paper_names
 
 # function for the getting link information
@@ -309,7 +312,7 @@ def get_urls(url_tag):
     '''Get urls'''
     links = []
     for i in range(len(url_tag)):
-      links.append(url_tag[i].a['href']) 
+        links.append(url_tag[i].a['href']) 
     return links 
 
 def get_author(author_tag):
@@ -331,14 +334,13 @@ def results_table(paper_name, author, link):
   paper_dict['title'].extend(paper_name)
   paper_dict['author'].extend(author)
   paper_dict['url'].extend(link)
-
   return pd.DataFrame(paper_dict)
 
 #%% Begin Google Scholar
 
 google_scholar_list = []
 
-years = list(range(2002,2023))
+years = list(range(2012,2023))
 
 for year in years:
     
