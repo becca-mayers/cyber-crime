@@ -24,12 +24,13 @@ from selenium import webdriver
 from time import sleep,time
 from requests import get
 import pandas as pd
+import tweepy
+import csv
 import re
 
 start_time = time()
 
-
-#%% Helper func
+#%% Helper functions
 def parse_it(table):       
     rows = []
     trs = table.find_all('tr')
@@ -67,6 +68,10 @@ ic3_years = list(range(2016,2022))
 #initialize data list
 ic3_list = []
 
+victim_count_list = []
+loss_amount_list = []
+subject_count_list = []
+
 for ic3_year in ic3_years:
     
     ic3_url = 'https://www.ic3.gov/Media/PDF/AnnualReport/{}State/StateReport.aspx'.format(str(ic3_year))
@@ -79,18 +84,16 @@ for ic3_year in ic3_years:
         state_dropdown_xpath = '/html/body/div/form/header/div[2]/h1'
         selected_state = wait.until(EC.element_to_be_clickable((By.XPATH, state_dropdown_xpath))).text
         
-        print(i,selected_state)
+        print(ic3_year, selected_state)
     
         #switch to soup
         soup = bs(driver.page_source, 'lxml') 
     
         #find all the page tables
         ic3_tables = soup.find_all('table', class_ = 'crimetype')
-        
-        #for i in range(0,len(ic3_tables)):
+
         for ic3_table in ic3_tables:
-            
-            #ic3_table = ic3_tables[i]
+
             #parse table
             this_ic3_table = parse_it(ic3_table)
             #convert to dataframe, set headers
@@ -104,41 +107,43 @@ for ic3_year in ic3_years:
             final_ic3_df = pd.concat([first_ic3_subset_df, second_ic3_subset_df])
             #insert state and source
             final_ic3_df['state'] = selected_state
+            final_ic3_df['year'] = ic3_year
             final_ic3_df['url'] = ic3_url
+            
+            if 'Victim Count' in final_ic3_df.columns.values:
+                 victim_count_list.append(final_ic3_df)
+            
+            elif 'Loss Amount' in final_ic3_df.columns.values:
+                loss_amount_list.append(final_ic3_df)
+            
+            elif 'Subject Count' in final_ic3_df.columns.values:
+                subject_count_list.append(final_ic3_df)
             
             ic3_list.append(final_ic3_df)
 
         updated_url = ic3_url + '#?s={}'.format(str(i))
-        
-        print(updated_url)
-    
+
         driver.get(updated_url)
         
         sleep(1)        
 
-victim_count_list = []
-loss_amount_list = []
-subject_count_list = []
-
-for ic3 in ic3_list:
-    
-    if 'Victim Count' in ic3.columns.values:
-         victim_count_list.append(ic3)
-    
-    elif 'Loss Amount' in ic3.columns.values:
-        loss_amount_list.append(ic3)
-    
-    elif 'Subject Count' in ic3.columns.values:
-        subject_count_list.append(ic3)
-        
 victim_count_df = pd.concat(victim_count_list)
-#victim_count_df = victim_count_df.drop_duplicates()
+victim_count_df.to_csv('Victim Count.csv')
 
 loss_amount_df = pd.concat(loss_amount_list)
-#loss_amount_df = loss_amount_df.drop_duplicates()
+
+#clean up the formatting
+loss_amount_df['Loss Amount'] = loss_amount_df['Loss Amount'].str.replace('$','').str.replace(',','')
+loss_amount_df = loss_amount_df.reset_index().drop('index', axis = 1)
+for i in range(0, len(loss_amount_df.index)):
+    loss_amount = loss_amount_df.loc[i, 'Loss Amount']
+    if loss_amount is not None:
+        loss_amount = int(loss_amount)
+        loss_amount_df.loc[i,'Loss Amount'] = loss_amount
+loss_amount_df.to_csv('Loss Amount.csv')
 
 subject_count_df = pd.concat(subject_count_list)
-#subject_count_df = subject_count_df.drop_duplicates()
+subject_count_df.to_csv('Subject Count.csv')
 
 #free up some memory
 del victim_count_list
@@ -214,7 +219,8 @@ for i in range(1, total_pages + 1):
 
 #concatenate the list of dataframes
 google_exploits_df = pd.concat(google_exploit_list)    
-#google_exploits_df = google_exploits_df.drop_duplicates()    
+google_exploits_df['Date'] = pd.to_datetime(google_exploits_df['Date'])
+google_exploits_df.to_csv('Google Exploits.csv')
 
 #free up some memory
 del google_exploit_list
@@ -232,9 +238,7 @@ for year in years:
     
         cve_details_url = 'https://www.cvedetails.com/vulnerability-list/year-{}/month-{}/{}.html'.format(str(year), str(month_number), month_name[month_number])
         driver.get(cve_details_url)
-        
-        print(cve_details_url)
-        
+
         #move to the bottom to get all of the page links
         scroll_to_bottom(driver)
         page_section = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="pagingb"]')))
@@ -244,152 +248,50 @@ for year in years:
             
             print(year, month_name[month_number], l)
             
-            #redeclare stale elements
-            scroll_to_bottom(driver)
-            page_section = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="pagingb"]')))
-            link = [i for i in page_section.find_elements(By.TAG_NAME,'a')][l]
-            
-            link.click()
-            
-            soup = bs(driver.page_source, 'lxml') 
-    
-            #find the page table
-            cve_table = soup.find('table', class_ = 'searchresults sortable')            
-    
             try:
-                this_cve_table = parse_it(cve_table)
-                #create dataframe from results
-                this_cve_table_df = pd.DataFrame(this_cve_table, columns = this_cve_table[0])
-                #drop out the first row
-                this_cve_table_df = this_cve_table_df.drop(this_cve_table_df.index[0])
-                cve_details_list.append(this_cve_table_df)
-              
-            except:
-                 pass
+                #redeclare stale elements
+                scroll_to_bottom(driver)
+                page_section = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="pagingb"]')))
+                link = [i for i in page_section.find_elements(By.TAG_NAME,'a')][l]
+                
+                link.click()
+                
+                soup = bs(driver.page_source, 'lxml') 
+        
+                #find the page table
+                cve_table = soup.find('table', class_ = 'searchresults sortable')            
+        
+                try:
+                    this_cve_table = parse_it(cve_table)
+                    #create dataframe from results
+                    this_cve_table_df = pd.DataFrame(this_cve_table, columns = this_cve_table[0])
+                    #drop out the first row
+                    this_cve_table_df = this_cve_table_df.drop(this_cve_table_df.index[0])
+                    cve_details_list.append(this_cve_table_df)
+                  
+                except:
+                     pass
+            
+            except TimeoutException:
+                pass
 
 cve_details_df = pd.concat(cve_details_list)
-#cve_details_df = cve_details_df.drop_duplicates()
+
+#add the even indices under column '#' as descriptions to the prior row
+descriptions = cve_details_df['#'][1::2]
+descriptions_df = pd.DataFrame(descriptions)
+descriptions_df = descriptions_df.reset_index().drop('index', axis = 1).rename(columns = {'#':'description'})
+
+#drop out odd rows
+cve_details_to_keep = cve_details_df[::2]
+cve_details_to_keep = cve_details_to_keep.reset_index().drop('index', axis = 1)
+final_cve_details_df = cve_details_to_keep.merge(descriptions_df, left_index = True, right_index = True)
+final_cve_details_df.to_csv('CVE Details.csv')
 
 #free up some memory
 del cve_details_list
 
 driver.close()
-
-#%% Google Scholar
-#credit: https://medium.com/@nandinisaini021/scraping-publications-of-aerial-image-research-papers-on-google-scholar-using-python-a0dee9744728
-
-#Helper Functions
-
-def get_paper_info(paper_url):
-    '''Collect page info'''
-    headers = {'user-agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.114 Safari/537.36'}
-    response = get(paper_url,headers=headers)  
-    #check for successful response
-    if response.status_code != 200:
-        raise Exception('Failed to fetch web page.')          
-        #try again
-        response = get(paper_url,headers=headers)  
-    #get page text
-    paper_doc = bs(response.text,'html.parser')
-    return paper_doc
-
-def get_tags(doc):
-    '''Collect element tags'''
-    paper_tag = doc.select('[data-lid]')
-    url_tag = doc.find_all('h3',{"class" : "gs_rt"})
-    author_tag = doc.find_all("div", {"class": "gs_a"})
-    return paper_tag, url_tag,author_tag
-
-def get_title(paper_tag):
-    '''Collect paper title'''
-    paper_names = []
-    for tag in paper_tag:
-        paper_names.append(tag.select('h3')[0].get_text())
-    return paper_names
-
-# function for the getting link information
-def get_urls(url_tag):
-    '''Get urls'''
-    links = []
-    for i in range(len(url_tag)):
-        links.append(url_tag[i].a['href']) 
-    return links 
-
-def get_author(author_tag):
-    '''Get authors'''
-    authors = []
-    for i in range(len(author_tag)):
-        author_tag_text = (author_tag[i].text).split()
-        author = author_tag_text[0] + ' ' + re.sub(',','', author_tag_text[1])
-        authors.append(author) 
-    return authors
-
-#collect results
-paper_dict = { 'title': [],
-              'author': [],
-                 'url': []}
-
-# adding information in repository
-def results_table(paper_name, author, link):
-  paper_dict['title'].extend(paper_name)
-  paper_dict['author'].extend(author)
-  paper_dict['url'].extend(link)
-  return pd.DataFrame(paper_dict)
-
-#%% Begin Google Scholar
-
-google_scholar_list = []
-
-years = list(range(2012,2023))
-
-for year in years:
-    
-    for i in range (0,110,10):
-    
-        google_scholar_url = 'https://scholar.google.com/scholar?start={}&q=cybercrime&hl=en&as_sdt=0,44&as_ylo={}&as_rr=1&as_vis=1'.format(str(i), str(year))
-        
-        print(i, year, google_scholar_url)
-          
-        #get page content
-        doc = get_paper_info(google_scholar_url)
-    
-        #collect tags
-        paper_tag, url_tag, author_tag = get_tags(doc)
-          
-        #collect titles
-        paper_name = get_title(paper_tag)
-        
-        #collect author
-        author = get_author(author_tag)
-        
-        #get paper url
-        paper_url = get_urls(url_tag)
-        
-        #put it all together
-        google_scholar_results = results_table(paper_name, author, paper_url)
-          
-        google_scholar_results['year'] = year
-        
-        google_scholar_list.append(google_scholar_results)
-          
-        # use sleep to avoid status code 429
-        sleep(5)
-
-google_scholar_df = pd.concat(google_scholar_list)
-google_scholar_df = google_scholar_df.drop_duplicates()
-
-del google_scholar_list
-
-#dolthub
-dolthub_url = 'https://www.dolthub.com/discover'
-
-#Vulnerability db 
-vuldb_url = 'https://vuldb.com/?stats'
-
-#cx security vulnerability database
-cx_url = 'https://cxsecurity.com/exploit/'
-
-#vulnerability lab https://www.vulnerability-lab.com/
 
 end_time = time()
 
